@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal"
@@ -679,7 +680,7 @@ func downloadMedia(ctx context.Context, client *whatsmeow.Client, messageStore *
 		return false, "", "", "", fmt.Errorf("failed to save media file: %v", err)
 	}
 
-	fmt.Printf("Successfully downloaded %s media to %s (%d bytes)\n", clean(mediaType), clean(absPath), len(mediaData))
+	fmt.Printf("Successfully downloaded %s media for message %s (%d bytes)\n", clean(mediaType), clean(messageID), len(mediaData))
 	return true, mediaType, filename, absPath, nil
 }
 
@@ -738,6 +739,32 @@ func prepareStore(dir string) error {
 	return nil
 }
 
+// cleanLogger passes every log line through clean before the underlying logger prints it, whatsmeow's own lines
+// included: they can hold names and text that came from WhatsApp, and other programs read the output line by line.
+type cleanLogger struct {
+	inner waLog.Logger
+}
+
+func newCleanLogger(inner waLog.Logger) waLog.Logger {
+	return &cleanLogger{inner: inner}
+}
+
+func (l *cleanLogger) Errorf(msg string, args ...any) {
+	l.inner.Errorf("%s", clean(fmt.Sprintf(msg, args...)))
+}
+func (l *cleanLogger) Warnf(msg string, args ...any) {
+	l.inner.Warnf("%s", clean(fmt.Sprintf(msg, args...)))
+}
+func (l *cleanLogger) Infof(msg string, args ...any) {
+	l.inner.Infof("%s", clean(fmt.Sprintf(msg, args...)))
+}
+func (l *cleanLogger) Debugf(msg string, args ...any) {
+	l.inner.Debugf("%s", clean(fmt.Sprintf(msg, args...)))
+}
+func (l *cleanLogger) Sub(module string) waLog.Logger {
+	return &cleanLogger{inner: l.inner.Sub(module)}
+}
+
 // chatServers are the servers a chat JID may name: a person (phone number or LID), a group, a channel.
 var chatServers = map[string]bool{
 	types.DefaultUserServer: true,
@@ -772,10 +799,44 @@ func validMessageID(id string) bool {
 	return true
 }
 
+// maxDocumentNameBytes is the most of a document's name that goes into a stored file name.
+const maxDocumentNameBytes = 200
+
+// maxFileNameBytes is the longest file name the file systems the bridge runs on accept.
+const maxFileNameBytes = 255
+
 // mediaFileName is the name a download is stored under: the message ID and the last part of the name the message
-// gives, so two messages never share a file.
+// gives, so two messages never share a file. The document's name is cut so the whole stays within maxFileNameBytes.
 func mediaFileName(messageID, filename string) string {
-	return messageID + "_" + filename
+	limit := maxFileNameBytes - len(messageID) - 1
+	if limit > maxDocumentNameBytes {
+		limit = maxDocumentNameBytes
+	}
+	return messageID + "_" + shortenFileName(filename, limit)
+}
+
+// shortenFileName cuts name to at most limit bytes on a rune boundary, keeping its extension when the extension
+// leaves room for some of the name before it.
+func shortenFileName(name string, limit int) string {
+	if len(name) <= limit {
+		return name
+	}
+	ext := filepath.Ext(name)
+	if len(ext) >= limit/2 {
+		ext = ""
+	}
+	return cutAtRune(strings.TrimSuffix(name, ext), limit-len(ext)) + ext
+}
+
+// cutAtRune returns the longest prefix of s of at most n bytes that does not end inside a UTF-8 sequence.
+func cutAtRune(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // storedFileMatches reports whether path holds a file whose SHA-256 is the one the message names. Without a stored
@@ -1210,11 +1271,11 @@ func main() {
 	}
 
 	// Set up logger
-	logger := waLog.Stdout("Client", "INFO", true)
+	logger := newCleanLogger(waLog.Stdout("Client", "INFO", true))
 	logger.Infof("Starting WhatsApp client...")
 
 	// Create database connection for storing session data
-	dbLog := waLog.Stdout("Database", "INFO", true)
+	dbLog := newCleanLogger(waLog.Stdout("Database", "INFO", true))
 
 	// Create the store folder, or make an existing one private to this user
 	if err := prepareStore("store"); err != nil {
@@ -1354,7 +1415,7 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 	err := messageStore.db.QueryRow("SELECT name FROM chats WHERE jid = ?", chatJID).Scan(&existingName)
 	if err == nil && existingName != "" {
 		// Chat exists with a name, use that
-		logger.Infof("Using existing chat name for %s: %s", clean(chatJID), clean(existingName))
+		logger.Infof("Using existing chat name for %s", clean(chatJID))
 		return existingName
 	}
 
@@ -1407,7 +1468,6 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 			}
 		}
 
-		logger.Infof("Using group name: %s", clean(name))
 	} else {
 		// This is an individual contact
 		logger.Infof("Getting name for contact: %s", clean(chatJID))
@@ -1424,7 +1484,6 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 			name = jid.User
 		}
 
-		logger.Infof("Using contact name: %s", clean(name))
 	}
 
 	return name

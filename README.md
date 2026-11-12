@@ -9,10 +9,10 @@ What differs from the original:
 - The bridge's REST API listens on `127.0.0.1` only, never on other addresses.
 - The default port is 8741, not 8080 (local Docker projects often publish 8080 on every address and then answer requests meant for the bridge).
 - Every request must name `127.0.0.1:<port>` or `localhost:<port>` as its `Host`, send `Content-Type: application/json`, and carry the token when one is set. Other requests get 403, 415 or 401.
-- A received file name is cut to its last part, so a document named `../../x` cannot be written outside the chat's folder. Downloads are stored as `<message id>_<name>`, so two documents with one name never share a file.
+- A received file name is cut to its last part, so a document named `../../x` cannot be written outside the chat's folder. Downloads are stored as `<message id>_<name>`, with the name cut to at most 200 bytes (its extension kept), so two documents with one name never share a file.
 - The bridge uses a current whatsmeow. When a stored media link has expired, it asks the sender's phone to upload the file again (the phone must be online and still have the file).
 - The store folder `whatsapp-bridge/store` is private to your user: folders 0700, databases and downloads 0600. An existing store is tightened when the bridge starts.
-- The bridge does not print message text, file names or senders: only that a message was stored, and in which chat.
+- The bridge does not print message text, file names, senders or chat and contact names: only that a message was stored, and in which chat. Every line it prints, whatsmeow's own log lines included, has control characters and line breaks replaced by spaces.
 - Building the bridge needs the Go version named in [whatsapp-bridge/go.mod](./whatsapp-bridge/go.mod) (or newer).
 
 ### Environment variables
