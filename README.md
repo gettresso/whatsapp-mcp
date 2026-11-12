@@ -29,6 +29,20 @@ The MCP server needs the same `WHATSAPP_BRIDGE_TOKEN` and `WHATSAPP_BRIDGE_PORT`
 
 Tresso's desktop app needs this fork. It refuses a bridge without the token check as unprotected, and it gives every bridge it starts a fresh token of its own. A separately configured MCP server therefore cannot send through a bridge that Tresso started; run a bridge of your own for it.
 
+### Using it with Tresso
+
+1. Clone this fork and build the bridge once. This needs the Go version named in [whatsapp-bridge/go.mod](./whatsapp-bridge/go.mod) (Go 1.26.0 at the moment) or newer:
+
+   ```bash
+   cd whatsapp-bridge && go build -o whatsapp-bridge .
+   ```
+
+2. Do not run the bridge yourself. In Tresso's Connect WhatsApp dialog, choose the folder of your clone (the one that holds `whatsapp-bridge`). Tresso starts the bridge from that folder, gives it a fresh token on every start, and stops it when you quit Tresso or disconnect WhatsApp.
+3. A bridge you started yourself (for example with `go run .` from the steps below) keeps the port, and Tresso then shows "Port in use". Quit that bridge first.
+4. After pulling a new version of this fork, build again with the same command.
+
+The installation steps below are for using the fork without Tresso: a bridge you run yourself, with the MCP server.
+
 ## About
 
 This is a Model Context Protocol (MCP) server for WhatsApp.
