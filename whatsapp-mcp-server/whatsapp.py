@@ -8,7 +8,14 @@ import json
 import audio
 
 MESSAGES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'whatsapp-bridge', 'store', 'messages.db')
-WHATSAPP_API_BASE_URL = "http://localhost:8080/api"
+# 127.0.0.1, not localhost: localhost can resolve to ::1, where another local
+# server may answer. Keep the port in sync with WHATSAPP_BRIDGE_PORT.
+WHATSAPP_API_BASE_URL = os.environ.get(
+    "WHATSAPP_API_BASE_URL",
+    f"http://127.0.0.1:{os.environ.get('WHATSAPP_BRIDGE_PORT', '8741')}/api",
+)
+# Without a timeout a request to a bridge that never answers hangs forever.
+BRIDGE_TIMEOUT_SECONDS = 120
 
 @dataclass
 class Message:
@@ -634,7 +641,7 @@ def send_message(recipient: str, message: str) -> Tuple[bool, str]:
             "message": message,
         }
         
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -668,7 +675,7 @@ def send_file(recipient: str, media_path: str) -> Tuple[bool, str]:
             "media_path": media_path
         }
         
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -708,7 +715,7 @@ def send_audio_message(recipient: str, media_path: str) -> Tuple[bool, str]:
             "media_path": media_path
         }
         
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -741,7 +748,7 @@ def download_media(message_id: str, chat_jid: str) -> Optional[str]:
             "chat_jid": chat_jid
         }
         
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
         
         if response.status_code == 200:
             result = response.json()
