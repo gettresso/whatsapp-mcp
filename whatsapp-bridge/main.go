@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -565,6 +567,11 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	var fileLength uint64
 	var err error
 
+	// The chat JID becomes a folder name: it must not name another folder.
+	if chatJID == "" || strings.ContainsAny(chatJID, "/\\") || strings.Contains(chatJID, "..") {
+		return false, "", "", "", fmt.Errorf("invalid chat JID")
+	}
+
 	// First, check if we already have this file
 	chatDir := fmt.Sprintf("store/%s", strings.ReplaceAll(chatJID, ":", "_"))
 	localPath := ""
@@ -587,6 +594,13 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	// Check if this is a media message
 	if mediaType == "" {
 		return false, "", "", "", fmt.Errorf("not a media message")
+	}
+
+	// A document's name comes from whoever sent it: keep only its last part, so the file cannot be written outside
+	// the chat's folder (a name such as ../../Library/LaunchAgents/x.plist).
+	filename = filepath.Base(filename)
+	if filename == "." || filename == ".." || filename == string(filepath.Separator) {
+		return false, "", "", "", fmt.Errorf("invalid file name")
 	}
 
 	// Create directory for the chat if it doesn't exist
@@ -792,8 +806,42 @@ func extractDirectPathFromURL(url string) string {
 	return "/" + pathPart
 }
 
+// protect lets a request through only when it names this computer as its host, carries the bridge's token (when
+// WHATSAPP_BRIDGE_TOKEN is set) and has a JSON body. The API has no other check, and anything on this computer reaches
+// 127.0.0.1: another program, and a web page in a browser through a no-cors POST (which can send neither this header
+// nor a JSON content type) or through a name of its own that resolves to 127.0.0.1 (DNS rebinding, which the host
+// check stops).
+func protect(next http.Handler, token string, port int) http.Handler {
+	hosts := map[string]bool{
+		fmt.Sprintf("127.0.0.1:%d", port): true,
+		fmt.Sprintf("localhost:%d", port): true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hosts[strings.ToLower(r.Host)] {
+			http.Error(w, "Forbidden host", http.StatusForbidden)
+			return
+		}
+		if token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Bridge-Token")), []byte(token)) != 1 {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Start a REST API server to expose the WhatsApp client functionality
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
+	// A token that is set but empty is a mistake, not a choice for no token: the API does not start.
+	token, tokenSet := os.LookupEnv("WHATSAPP_BRIDGE_TOKEN")
+	if tokenSet && token == "" {
+		fmt.Println("Not starting the REST API: WHATSAPP_BRIDGE_TOKEN is set but empty")
+		os.Exit(1)
+	}
+
 	// Handler for sending messages
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
@@ -897,7 +945,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 	// Run server in a goroutine so it doesn't block
 	go func() {
-		if err := http.ListenAndServe(serverAddr, nil); err != nil {
+		if err := http.ListenAndServe(serverAddr, protect(http.DefaultServeMux, token, port)); err != nil {
 			fmt.Printf("REST API server error: %v\n", err)
 			os.Exit(1)
 		}
