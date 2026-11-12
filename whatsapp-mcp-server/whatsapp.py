@@ -17,6 +17,12 @@ WHATSAPP_API_BASE_URL = os.environ.get(
 # Without a timeout a request to a bridge that never answers hangs forever.
 BRIDGE_TIMEOUT_SECONDS = 120
 
+
+def bridge_headers() -> dict:
+    """The token a bridge started with WHATSAPP_BRIDGE_TOKEN asks for; nothing when none is set."""
+    token = os.environ.get("WHATSAPP_BRIDGE_TOKEN", "")
+    return {"X-Bridge-Token": token} if token else {}
+
 @dataclass
 class Message:
     timestamp: datetime
@@ -641,7 +647,7 @@ def send_message(recipient: str, message: str) -> Tuple[bool, str]:
             "message": message,
         }
         
-        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
+        response = requests.post(url, json=payload, headers=bridge_headers(), timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -675,7 +681,7 @@ def send_file(recipient: str, media_path: str) -> Tuple[bool, str]:
             "media_path": media_path
         }
         
-        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
+        response = requests.post(url, json=payload, headers=bridge_headers(), timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -715,7 +721,7 @@ def send_audio_message(recipient: str, media_path: str) -> Tuple[bool, str]:
             "media_path": media_path
         }
         
-        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
+        response = requests.post(url, json=payload, headers=bridge_headers(), timeout=BRIDGE_TIMEOUT_SECONDS)
         
         # Check if the request was successful
         if response.status_code == 200:
@@ -748,7 +754,7 @@ def download_media(message_id: str, chat_jid: str) -> Optional[str]:
             "chat_jid": chat_jid
         }
         
-        response = requests.post(url, json=payload, timeout=BRIDGE_TIMEOUT_SECONDS)
+        response = requests.post(url, json=payload, headers=bridge_headers(), timeout=BRIDGE_TIMEOUT_SECONDS)
         
         if response.status_code == 200:
             result = response.json()

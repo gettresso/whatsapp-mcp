@@ -1,5 +1,36 @@
 # WhatsApp MCP Server
 
+## This fork
+
+This is a fork of [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp), under the same MIT license. The original copyright notice in [LICENSE](./LICENSE) is kept.
+
+What differs from the original:
+
+- The bridge's REST API listens on `127.0.0.1` only, never on other addresses.
+- The default port is 8741, not 8080 (local Docker projects often publish 8080 on every address and then answer requests meant for the bridge).
+- Every request must name `127.0.0.1:<port>` or `localhost:<port>` as its `Host`, send `Content-Type: application/json`, and carry the token when one is set. Other requests get 403, 415 or 401.
+- A received file name is cut to its last part, so a document named `../../x` cannot be written outside the chat's folder. Downloads are stored as `<message id>_<name>`, with the name cut to at most 200 bytes (its extension kept), so two documents with one name never share a file.
+- The bridge uses a current whatsmeow. When a stored media link has expired, it asks the sender's phone to upload the file again (the phone must be online and still have the file).
+- The store folder `whatsapp-bridge/store` is private to your user: folders 0700, databases and downloads 0600. An existing store is tightened when the bridge starts.
+- The bridge does not print message text, file names, senders or chat and contact names: only that a message was stored, and in which chat. Every line it prints, whatsmeow's own log lines included, has control characters and line breaks replaced by spaces.
+- Building the bridge needs the Go version named in [whatsapp-bridge/go.mod](./whatsapp-bridge/go.mod) (or newer).
+
+### Environment variables
+
+| Variable | Read by | Meaning |
+|----------|---------|---------|
+| `WHATSAPP_BRIDGE_PORT` | bridge and MCP server | Port of the REST API, 1 to 65535. Default 8741. An invalid value stops the bridge before it connects to WhatsApp. |
+| `WHATSAPP_BRIDGE_TOKEN` | bridge and MCP server | Secret that every request must send in the `X-Bridge-Token` header. Set but empty: the bridge does not start. Unset: no token check, and the bridge prints a warning that any program on this computer can use the API. |
+| `WHATSAPP_API_BASE_URL` | MCP server only | Full base URL of the API, default `http://127.0.0.1:<WHATSAPP_BRIDGE_PORT>/api`. Keep it on `127.0.0.1`: the token is sent there. |
+
+The MCP server needs the same `WHATSAPP_BRIDGE_TOKEN` and `WHATSAPP_BRIDGE_PORT` in its environment as the bridge it talks to (see step 3 below).
+
+### Tresso
+
+Tresso's desktop app needs this fork. It refuses a bridge without the token check as unprotected, and it gives every bridge it starts a fresh token of its own. A separately configured MCP server therefore cannot send through a bridge that Tresso started; run a bridge of your own for it.
+
+## About
+
 This is a Model Context Protocol (MCP) server for WhatsApp.
 
 With this you can search and read your personal Whatsapp messages (including images, videos, documents, and audio messages), search your contacts and send messages to either individuals or groups. You can also send media files including images, videos, documents, and audio messages.
@@ -18,7 +49,7 @@ Here's an example of what you can do when it's connected to Claude.
 
 ### Prerequisites
 
-- Go
+- Go, the version named in `whatsapp-bridge/go.mod` or newer
 - Python 3.6+
 - Anthropic Claude Desktop app (or Cursor)
 - UV (Python package manager), install with `curl -LsSf https://astral.sh/uv/install.sh | sh`
@@ -29,20 +60,22 @@ Here's an example of what you can do when it's connected to Claude.
 1. **Clone this repository**
 
    ```bash
-   git clone https://github.com/lharries/whatsapp-mcp.git
+   git clone https://github.com/gettresso/whatsapp-mcp.git
    cd whatsapp-mcp
    ```
 
 2. **Run the WhatsApp bridge**
 
-   Navigate to the whatsapp-bridge directory and run the Go application:
+   Navigate to the whatsapp-bridge directory and run the Go application. Choose a token (for example `openssl rand -hex 32`) and, if you like, a port other than 8741:
 
    ```bash
    cd whatsapp-bridge
-   go run main.go
+   export WHATSAPP_BRIDGE_TOKEN="<your token>"
+   export WHATSAPP_BRIDGE_PORT=8741
+   go run .
    ```
 
-   The first time you run it, you will be prompted to scan a QR code. Scan the QR code with your WhatsApp mobile app to authenticate.
+   The REST API then listens on `127.0.0.1:8741`. The first time you run it, you will be prompted to scan a QR code. Scan the QR code with your WhatsApp mobile app to authenticate.
 
    After approximately 20 days, you will might need to re-authenticate.
 
@@ -60,7 +93,11 @@ Here's an example of what you can do when it's connected to Claude.
            "{{PATH_TO_SRC}}/whatsapp-mcp/whatsapp-mcp-server", // cd into the repo, run `pwd` and enter the output here + "/whatsapp-mcp-server"
            "run",
            "main.py"
-         ]
+         ],
+         "env": {
+           "WHATSAPP_BRIDGE_TOKEN": "<your token>", // the same token the bridge runs with
+           "WHATSAPP_BRIDGE_PORT": "8741" // the same port the bridge runs with
+         }
        }
      }
    }
@@ -99,7 +136,7 @@ If you're running this project on Windows, be aware that `go-sqlite3` requires *
    ```bash
    cd whatsapp-bridge
    go env -w CGO_ENABLED=1
-   go run main.go
+   go run .
    ```
 
 Without this setup, you'll likely run into errors like:
